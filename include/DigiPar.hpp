@@ -4,9 +4,11 @@
 #include <CAENDigitizer.h>
 #include <CAENDigitizerType.h>
 
-constexpr int MAX_CHANNELS = 32;
+constexpr int MAX_CHANNELS = 16;
 
-enum class SyncType {
+// To convert to bson, enum class needs tricks
+// Using old enum is easy but can be the bug source
+enum SyncType {
   Master,
   Slave,
   StandAlone,
@@ -55,19 +57,21 @@ class DigiPar
 
   ~DigiPar(){};
 
+  // PAR_DEF_START
   // For Communication with digitizer
   CAEN_DGTZ_ConnectionType LinkType = CAEN_DGTZ_USB;
   int LinkNum = 0;
   int ConetNode = 0;
   uint32_t VMEBaseAddress = 0x0;
+  int BrdNum = 0;
 
   // Sync Settings
   CAEN_DGTZ_RunSyncMode_t RunSyncMode = CAEN_DGTZ_RUN_SYNC_Disabled;
   CAEN_DGTZ_AcqMode_t StartMode = CAEN_DGTZ_SW_CONTROLLED;
   SyncType RunSync = SyncType::StandAlone;
 
-  // Channel settings
-  uint32_t ChMask = 0b11111111111111111111111111111111;
+  // Channel input settings
+  uint32_t ChMask = 0b1111111111111111;
   // uint32_t ChMask = 0b00001000;
   uint32_t DCOffset[MAX_CHANNELS];
   CAEN_DGTZ_PulsePolarity_t Polarity[MAX_CHANNELS];
@@ -118,6 +122,8 @@ class DigiPar
   int DigitalGain[MAX_CHANNELS];
   float EneFineGain[MAX_CHANNELS];
   int Decimation[MAX_CHANNELS];
+
+  //PAR_DEF_STOP
 
  private:
 };
