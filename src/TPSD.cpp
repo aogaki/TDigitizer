@@ -110,63 +110,65 @@ void TPSD::ReadEvents()
   errCode = CAEN_DGTZ_GetDPPEvents(fHandler, fpReadoutBuffer, bufferSize,
                                    (void **)(fppPSDEvents), nEvents);
 
-  for (auto iCh = 0; iCh < 8; iCh++) {
-    for (auto iEve = 0; iEve < nEvents[iCh]; iEve++) {
-      const uint64_t TSMask = 0x7FFFFFFF;
-      uint64_t timeTag = fppPSDEvents[iCh][iEve].TimeTag;
-      if (timeTag < fPreviousTime[iCh]) {
-        fTimeOffset[iCh] += (TSMask + 1);
-      }
-      fPreviousTime[iCh] = timeTag;
-      auto tdc = (timeTag + fTimeOffset[iCh]) * fTimeSample;
-
-      auto data = new EveData(fDigiPar.RecordLength[iCh]);
-      data->ModNumber = 0;
-      data->ChNumber = iCh;
-      data->ChargeLong = fppPSDEvents[iCh][iEve].ChargeLong;
-      data->ChargeShort = fppPSDEvents[iCh][iEve].ChargeShort;
-      data->TimeStamp = tdc;
-      data->FineTS = 0;
-      if (fFlagFineTS) {
-        // For safety and to kill the rounding error, cleary using double
-        // No additional interpolation now
-        double posZC =
-            uint16_t((fppPSDEvents[iCh][iEve].Extras >> 16) & 0xFFFF);
-        double negZC = uint16_t(fppPSDEvents[iCh][iEve].Extras & 0xFFFF);
-        double thrZC = 8192;  // (1 << 13). (1 << 14) is maximum of ADC
-        if (fDigiPar.DiscrMode[iCh] == CAEN_DGTZ_DPP_DISCR_MODE_LED)
-          thrZC += fDigiPar.TrgTh[iCh];
-
-        if ((negZC <= thrZC) && (posZC >= thrZC)) {
-          double dt = fTimeSample;
-          data->FineTS =
-              ((dt * 1000. * (thrZC - negZC) / (posZC - negZC)) + 0.5);
+  if (errCode == CAEN_DGTZ_Success) {
+    for (auto iCh = 0; iCh < 8; iCh++) {
+      for (auto iEve = 0; iEve < nEvents[iCh]; iEve++) {
+        const uint64_t TSMask = 0x7FFFFFFF;
+        uint64_t timeTag = fppPSDEvents[iCh][iEve].TimeTag;
+        if (timeTag < fPreviousTime[iCh]) {
+          fTimeOffset[iCh] += (TSMask + 1);
         }
+        fPreviousTime[iCh] = timeTag;
+        auto tdc = (timeTag + fTimeOffset[iCh]) * fTimeSample;
+
+        auto data = new EveData(fDigiPar.RecordLength[iCh]);
+        data->ModNumber = 0;
+        data->ChNumber = iCh;
+        data->ChargeLong = fppPSDEvents[iCh][iEve].ChargeLong;
+        data->ChargeShort = fppPSDEvents[iCh][iEve].ChargeShort;
+        data->TimeStamp = tdc;
+        data->FineTS = 0;
+        if (fFlagFineTS) {
+          // For safety and to kill the rounding error, cleary using double
+          // No additional interpolation now
+          double posZC =
+              uint16_t((fppPSDEvents[iCh][iEve].Extras >> 16) & 0xFFFF);
+          double negZC = uint16_t(fppPSDEvents[iCh][iEve].Extras & 0xFFFF);
+          double thrZC = 8192;  // (1 << 13). (1 << 14) is maximum of ADC
+          if (fDigiPar.DiscrMode[iCh] == CAEN_DGTZ_DPP_DISCR_MODE_LED)
+            thrZC += fDigiPar.TrgTh[iCh];
+
+          if ((negZC <= thrZC) && (posZC >= thrZC)) {
+            double dt = fTimeSample;
+            data->FineTS =
+                ((dt * 1000. * (thrZC - negZC) / (posZC - negZC)) + 0.5);
+          }
+        }
+
+        data->RecordLength = 0;
+        if (fDigiPar.AcqMode == CAEN_DGTZ_DPP_ACQ_MODE_Mixed) {
+          errCode = CAEN_DGTZ_DecodeDPPWaveforms(
+              fHandler, &(fppPSDEvents[iCh][iEve]), fpPSDWaveform);
+          CheckErrCode(errCode, "DecodeDPPWaveforms");
+
+          data->RecordLength = fpPSDWaveform->Ns;
+          data->Trace1.assign(&fpPSDWaveform->Trace1[0],
+                              &fpPSDWaveform->Trace1[data->RecordLength]);
+          data->Trace2.assign(&fpPSDWaveform->Trace2[0],
+                              &fpPSDWaveform->Trace2[data->RecordLength]);
+
+          data->DTrace1.assign(&fpPSDWaveform->DTrace1[0],
+                               &fpPSDWaveform->DTrace1[data->RecordLength]);
+          data->DTrace2.assign(&fpPSDWaveform->DTrace2[0],
+                               &fpPSDWaveform->DTrace2[data->RecordLength]);
+          data->DTrace3.assign(&fpPSDWaveform->DTrace3[0],
+                               &fpPSDWaveform->DTrace3[data->RecordLength]);
+          data->DTrace4.assign(&fpPSDWaveform->DTrace4[0],
+                               &fpPSDWaveform->DTrace4[data->RecordLength]);
+        }
+
+        fDataVec->push_back(data);
       }
-
-      data->RecordLength = 0;
-      if (fDigiPar.AcqMode == CAEN_DGTZ_DPP_ACQ_MODE_Mixed) {
-        errCode = CAEN_DGTZ_DecodeDPPWaveforms(
-            fHandler, &(fppPSDEvents[iCh][iEve]), fpPSDWaveform);
-        CheckErrCode(errCode, "DecodeDPPWaveforms");
-
-        data->RecordLength = fpPSDWaveform->Ns;
-        data->Trace1.assign(&fpPSDWaveform->Trace1[0],
-                            &fpPSDWaveform->Trace1[data->RecordLength]);
-        data->Trace2.assign(&fpPSDWaveform->Trace2[0],
-                            &fpPSDWaveform->Trace2[data->RecordLength]);
-
-        data->DTrace1.assign(&fpPSDWaveform->DTrace1[0],
-                             &fpPSDWaveform->DTrace1[data->RecordLength]);
-        data->DTrace2.assign(&fpPSDWaveform->DTrace2[0],
-                             &fpPSDWaveform->DTrace2[data->RecordLength]);
-        data->DTrace3.assign(&fpPSDWaveform->DTrace3[0],
-                             &fpPSDWaveform->DTrace3[data->RecordLength]);
-        data->DTrace4.assign(&fpPSDWaveform->DTrace4[0],
-                             &fpPSDWaveform->DTrace4[data->RecordLength]);
-      }
-
-      fDataVec->push_back(data);
     }
   }
 }

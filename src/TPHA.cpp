@@ -115,58 +115,60 @@ void TPHA::ReadEvents()
   errCode = CAEN_DGTZ_GetDPPEvents(fHandler, fpReadoutBuffer, bufferSize,
                                    (void **)(fppPHAEvents), nEvents);
 
-  for (auto iCh = 0; iCh < 8; iCh++) {
-    for (auto iEve = 0; iEve < nEvents[iCh]; iEve++) {
-      const uint64_t TSMask = 0x7FFFFFFF;
-      uint64_t timeTag = fppPHAEvents[iCh][iEve].TimeTag;
-      if (timeTag < fPreviousTime[iCh]) {
-        fTimeOffset[iCh] += (TSMask + 1);
-      }
-      fPreviousTime[iCh] = timeTag;
-      auto tdc = (timeTag + fTimeOffset[iCh]) * fTimeSample;
-
-      auto data = new EveData(fDigiPar.RecordLength[iCh]);
-      data->ModNumber = 0;
-      data->ChNumber = iCh;
-      data->ChargeLong = fppPHAEvents[iCh][iEve].Energy;
-      data->TimeStamp = tdc;
-      data->FineTS = 0;
-      if (fFlagFineTS) {
-        // For safety and to kill the rounding error, cleary using double
-        // No additional interpolation now
-        double posZC =
-            uint16_t((fppPHAEvents[iCh][iEve].Extras >> 16) & 0xFFFF);
-        double negZC = uint16_t(fppPHAEvents[iCh][iEve].Extras & 0xFFFF);
-        double thrZC = 8192;  // (1 << 13). (1 << 14) is maximum of ADC
-        if (fDigiPar.DiscrMode[iCh] == CAEN_DGTZ_DPP_DISCR_MODE_LED)
-          thrZC += fDigiPar.TrgTh[iCh];
-
-        if ((negZC <= thrZC) && (posZC >= thrZC)) {
-          double dt = fTimeSample;
-          data->FineTS =
-              ((dt * 1000. * (thrZC - negZC) / (posZC - negZC)) + 0.5);
+  if (errCode == CAEN_DGTZ_Success) {
+    for (auto iCh = 0; iCh < 8; iCh++) {
+      for (auto iEve = 0; iEve < nEvents[iCh]; iEve++) {
+        const uint64_t TSMask = 0x7FFFFFFF;
+        uint64_t timeTag = fppPHAEvents[iCh][iEve].TimeTag;
+        if (timeTag < fPreviousTime[iCh]) {
+          fTimeOffset[iCh] += (TSMask + 1);
         }
+        fPreviousTime[iCh] = timeTag;
+        auto tdc = (timeTag + fTimeOffset[iCh]) * fTimeSample;
+
+        auto data = new EveData(fDigiPar.RecordLength[iCh]);
+        data->ModNumber = 0;
+        data->ChNumber = iCh;
+        data->ChargeLong = fppPHAEvents[iCh][iEve].Energy;
+        data->TimeStamp = tdc;
+        data->FineTS = 0;
+        if (fFlagFineTS) {
+          // For safety and to kill the rounding error, cleary using double
+          // No additional interpolation now
+          double posZC =
+              uint16_t((fppPHAEvents[iCh][iEve].Extras >> 16) & 0xFFFF);
+          double negZC = uint16_t(fppPHAEvents[iCh][iEve].Extras & 0xFFFF);
+          double thrZC = 8192;  // (1 << 13). (1 << 14) is maximum of ADC
+          if (fDigiPar.DiscrMode[iCh] == CAEN_DGTZ_DPP_DISCR_MODE_LED)
+            thrZC += fDigiPar.TrgTh[iCh];
+
+          if ((negZC <= thrZC) && (posZC >= thrZC)) {
+            double dt = fTimeSample;
+            data->FineTS =
+                ((dt * 1000. * (thrZC - negZC) / (posZC - negZC)) + 0.5);
+          }
+        }
+
+        data->RecordLength = 0;
+        if (fDigiPar.AcqMode == CAEN_DGTZ_DPP_ACQ_MODE_Mixed) {
+          errCode = CAEN_DGTZ_DecodeDPPWaveforms(
+              fHandler, &(fppPHAEvents[iCh][iEve]), fpPHAWaveform);
+          CheckErrCode(errCode, "DecodeDPPWaveforms");
+
+          data->RecordLength = fpPHAWaveform->Ns;
+          data->Trace1.assign(&fpPHAWaveform->Trace1[0],
+                              &fpPHAWaveform->Trace1[data->RecordLength]);
+          data->Trace2.assign(&fpPHAWaveform->Trace2[0],
+                              &fpPHAWaveform->Trace2[data->RecordLength]);
+
+          data->DTrace1.assign(&fpPHAWaveform->DTrace1[0],
+                               &fpPHAWaveform->DTrace1[data->RecordLength]);
+          data->DTrace2.assign(&fpPHAWaveform->DTrace2[0],
+                               &fpPHAWaveform->DTrace2[data->RecordLength]);
+        }
+
+        fDataVec->push_back(data);
       }
-
-      data->RecordLength = 0;
-      if (fDigiPar.AcqMode == CAEN_DGTZ_DPP_ACQ_MODE_Mixed) {
-        errCode = CAEN_DGTZ_DecodeDPPWaveforms(
-            fHandler, &(fppPHAEvents[iCh][iEve]), fpPHAWaveform);
-        CheckErrCode(errCode, "DecodeDPPWaveforms");
-
-        data->RecordLength = fpPHAWaveform->Ns;
-        data->Trace1.assign(&fpPHAWaveform->Trace1[0],
-                            &fpPHAWaveform->Trace1[data->RecordLength]);
-        data->Trace2.assign(&fpPHAWaveform->Trace2[0],
-                            &fpPHAWaveform->Trace2[data->RecordLength]);
-
-        data->DTrace1.assign(&fpPHAWaveform->DTrace1[0],
-                             &fpPHAWaveform->DTrace1[data->RecordLength]);
-        data->DTrace2.assign(&fpPHAWaveform->DTrace2[0],
-                             &fpPHAWaveform->DTrace2[data->RecordLength]);
-      }
-
-      fDataVec->push_back(data);
     }
   }
 }
